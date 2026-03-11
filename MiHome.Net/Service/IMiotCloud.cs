@@ -1,6 +1,6 @@
 ﻿using System.Collections.Immutable;
-using System.IO;
 using System.Net;
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Web;
@@ -9,10 +9,6 @@ using MiHome.Net.Dto;
 using MiHome.Net.FeignService;
 using MiHome.Net.Utils;
 using Newtonsoft.Json;
-using SkiaSharp;
-using SkiaSharp.QrCode;
-using SkiaSharp.QrCode.Image;
-using SummerBoot.Cache;
 using SummerBoot.Core;
 using SummerBoot.Feign;
 
@@ -68,35 +64,35 @@ public interface IMiotCloud
     /// <summary>
     /// Get properties in batches批量获取属性
     /// </summary>
-    /// <param Name="param"></param>
+    /// <param name="properties"></param>
     /// <returns></returns>
     Task<List<GetPropOutputItemDto>> GetPropertiesAsync(List<GetPropertyDto> properties);
 
     /// <summary>
     /// get property获取属性 
     /// </summary>
-    /// <param Name="param"></param>
+    /// <param name="property"></param>
     /// <returns></returns>
     Task<GetPropOutputItemDto> GetPropertyAsync(GetPropertyDto property);
 
     /// <summary>
     /// set property设置属性
     /// </summary>
-    /// <param Name="param"></param>
+    /// <param name="property"></param>
     /// <returns></returns>
     Task<SetPropOutputItemDto> SetPropertyAsync(SetPropertyDto property);
 
     /// <summary>
     /// Set properties in batches 批量设置属性
     /// </summary>
-    /// <param Name="param"></param>
+    /// <param name="properties"></param>
     /// <returns></returns>
     Task<List<SetPropOutputItemDto>> SetPropertiesAsync(List<SetPropertyDto> properties);
 
     /// <summary>
     /// Call device method调用设备方法
     /// </summary>
-    /// <param Name="callActionParam"></param>
+    /// <param name="callActionParam"></param>
     /// <returns></returns>
     Task<string> CallActionAsync(CallActionInputDto callActionParam);
 
@@ -143,18 +139,16 @@ public class MIotCloud : IMiotCloud
     private readonly IFeignUnitOfWork             fegiFeignUnitOfWork;
     private readonly ILogger<MiHomeDriver>        logger;
     private readonly IMiAuthStateProvider         authStateProvider;
-    private readonly MiHomeAccountOption          option;
 
     public MIotCloud(IMiotCloudService miotCloudService, IXiaoMiLoginService xiaoMiLoginService,
         IXiaoMiControlDevicesService xiaoMiControlDevicesService, IFeignUnitOfWork fegiFeignUnitOfWork,
-        ILogger<MiHomeDriver> logger, MiHomeAccountOption option, IMiAuthStateProvider authStateProvider)
+        ILogger<MiHomeDriver> logger, IMiAuthStateProvider authStateProvider)
     {
         this.miotCloudService = miotCloudService;
         this.xiaoMiLoginService = xiaoMiLoginService;
         this.xiaoMiControlDevicesService = xiaoMiControlDevicesService;
         this.fegiFeignUnitOfWork = fegiFeignUnitOfWork;
         this.logger = logger;
-        this.option = option;
         this.authStateProvider = authStateProvider;
     }
 
@@ -197,7 +191,7 @@ public class MIotCloud : IMiotCloud
             }
 
             var instances = await miotCloudService.GetAllInstancesAsync();
-            using var sw = new StreamWriter(fi.OpenWrite());
+            await using var sw = new StreamWriter(fi.OpenWrite());
             await sw.WriteAsync(instances.ToJson());
             return instances;
         }
@@ -223,7 +217,7 @@ public class MIotCloud : IMiotCloud
             }
 
             var miotSpec = await miotCloudService.GetSpecByDeviceType(deviceType);
-            using var sw = new StreamWriter(fi.OpenWrite());
+            await using var sw = new StreamWriter(fi.OpenWrite());
             await sw.WriteAsync(miotSpec.ToJson());
             return miotSpec;
         }
@@ -233,9 +227,10 @@ public class MIotCloud : IMiotCloud
     ///关闭控制设备的cookie
     /// </summary>
     /// <returns></returns>
-    private async Task StopControlDeviceCookieAsync()
+    private Task StopControlDeviceCookieAsync()
     {
         fegiFeignUnitOfWork.StopCookie();
+        return Task.CompletedTask;
     }
 
     /// <summary>
@@ -287,142 +282,6 @@ public class MIotCloud : IMiotCloud
 
         await Logout();
         throw new Exception("登录信息已过期，请重新登录");
-    }
-
-    private void SaveLoginInfoToFile(LoginInfoDto dto)
-    {
-        if (File.Exists(GetAuthFilePath))
-        {
-            File.Delete(GetAuthFilePath);
-        }
-
-        var authJson = JsonConvert.SerializeObject(dto);
-        File.WriteAllText(GetAuthFilePath, authJson);
-    }
-
-    /// <summary>
-    /// 登录信息保存的文件路径
-    /// </summary>
-    private string GetAuthFilePath => Path.Combine(AppContext.BaseDirectory, "auth.json");
-
-    /// <summary>
-    /// 真正登录的代码
-    /// </summary>
-    /// <returns></returns>
-    /// <exception cref="Exception"></exception>
-    private async Task<LoginInfoDto> GetInternalLoginInfoAsync()
-    {
-        fegiFeignUnitOfWork.BeginCookie();
-
-        var clientId = GetClientId();
-        var url = "https://account.xiaomi.com/";
-        fegiFeignUnitOfWork.AddCookie(url, new Cookie("sdkVersion", "3.9"));
-        fegiFeignUnitOfWork.AddCookie(url, new Cookie("deviceId", clientId));
-
-        var result = await xiaoMiLoginService.ServiceLogin(clientId);
-        var startValue = "&&&START&&&";
-
-        if (result.HasText() && result.StartsWith(startValue))
-        {
-            result = result.Replace(startValue, "");
-            var resultObj = JsonConvert.DeserializeObject<ServiceLoginResultDto>(result);
-            if (resultObj == null)
-            {
-                throw new Exception("登录失败,原因：第一步");
-            }
-
-            long millis = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-            string dc2 = millis.ToString();
-
-            string location = resultObj.location;
-            var uri = new Uri(location);
-            var query = uri.Query;
-            var queryDict = HttpUtility.ParseQueryString(query);
-            var serviceParam = queryDict["serviceParam"] ?? "";
-
-            var qrCodeParam = new QrCodeLoginInputDto()
-            {
-                qs = resultObj.qs,
-                callback = resultObj.callback,
-                serviceParam = serviceParam,
-                _sign = resultObj._sign,
-                _dc = dc2
-            };
-            var loginUrlResultString = await xiaoMiLoginService.LoginUrl(qrCodeParam);
-            if (loginUrlResultString.HasText() && loginUrlResultString.StartsWith(startValue))
-            {
-                loginUrlResultString = loginUrlResultString.Replace(startValue, "");
-                var loginUrlResult = JsonConvert.DeserializeObject<QrCodeLoginOutPutDto>(loginUrlResultString);
-                if (loginUrlResult == null)
-                {
-                    throw new Exception("登录失败,原因：第2步,获取二维码信息失败");
-                }
-
-                if (loginUrlResult.code != 0)
-                {
-                    throw new Exception("登录失败,原因：第2步,获取二维码信息失败," + loginUrlResultString);
-                }
-
-                this.SaveQrCode(loginUrlResult.loginUrl);
-                var qrCodeLoginResultString = "";
-                try
-                {
-                    qrCodeLoginResultString = await xiaoMiLoginService.QrCodeLogin(loginUrlResult.lp);
-                }
-                catch (TimeoutException e)
-                {
-                    throw new Exception("登录失败,原因：第3步扫描二维码超时，请重新扫描");
-                }
-                catch (TaskCanceledException e)
-                {
-                    throw new Exception("登录失败,原因：第3步扫描二维码超时，请重新扫描");
-                }
-
-                if (qrCodeLoginResultString.HasText() && qrCodeLoginResultString.StartsWith(startValue))
-                {
-                    qrCodeLoginResultString = qrCodeLoginResultString.Replace(startValue, "");
-                    var qrCodeLoginResult =
-                        JsonConvert.DeserializeObject<QrCodeLogin2OutputDto>(qrCodeLoginResultString);
-                    if (qrCodeLoginResult == null)
-                    {
-                        throw new Exception("登录失败,原因：第4步解析失败");
-                    }
-
-                    if (qrCodeLoginResult.code != 0)
-                    {
-                        throw new Exception("登录失败,原因：第4步" + qrCodeLoginResult.desc);
-                    }
-
-                    var result3 = await xiaoMiLoginService.Login(qrCodeLoginResult.location);
-                    result3.EnsureSuccessStatusCode();
-                    var cookies = result3.Headers.Where(it => it.Key == "Set-Cookie")
-                        .SelectMany(it => it.Value)
-                        .ToList()
-                        .Select(it => it.Split(";")[0])
-                        .ToList();
-                    if (cookies.Count == 0)
-                    {
-                        throw new Exception("登录失败,原因：第5步，Get ServiceToken Error");
-                    }
-
-                    var serviceToken = cookies.FirstOrDefault(it => it.StartsWith("serviceToken"))
-                        ?.Replace("serviceToken=", "");
-                    fegiFeignUnitOfWork.StopCookie();
-                    var loginInfo = new LoginInfoDto()
-                    {
-                        DeviceId = clientId,
-                        ServiceToken = serviceToken,
-                        Ssecurity = qrCodeLoginResult.ssecurity,
-                        UserId = qrCodeLoginResult.userId
-                    };
-                    return loginInfo;
-                }
-            }
-        }
-
-        var errorMsg = "login fail";
-        logger?.LogError(errorMsg);
-        throw new Exception(errorMsg);
     }
 
     private async Task RefreshToken(LoginInfoDto loginInfo)
@@ -478,65 +337,27 @@ public class MIotCloud : IMiotCloud
             await authStateProvider.UpdateLoginInfo(loginInfo);
         }
     }
+    
 
-    private void SaveQrCode(string url)
+    private static string GetClientId()
     {
-        var path = InitQrCodePath();
-
-        using var output = new FileStream(path, FileMode.OpenOrCreate);
-        // generate QRCode
-        var qrCode = new QrCode(url, new Vector2Slim(256, 256), SKEncodedImageFormat.Png);
-        // output to file
-        qrCode.GenerateImage(output);
-    }
-
-    private string InitQrCodePath()
-    {
-        var path = option.QrCodeSavePath.HasText()
-            ? option.QrCodeSavePath
-            : Path.Combine(AppContext.BaseDirectory, "output");
-
-        if (!Directory.Exists(path))
-        {
-            Directory.CreateDirectory(path);
-        }
-
-        path = Path.Combine(path, "qr.png");
-        if (File.Exists(path))
-        {
-            File.Delete(path);
-        }
-
-        return path;
-    }
-
-    private string GetClientId()
-    {
-        var letters = "ABCDEF";
-        var resultList = new List<string>();
-        for (int i = 0; i < 13; i++)
-        {
-            var index = RandomNumberGenerator.GetInt32(0, 6);
-            var letter = letters[index].ToString();
-            resultList.Add(letter);
-        }
-
-        var result = string.Join("", resultList);
-        return result;
+        return Random.Shared.GetString("ABCDEF", 13);
     }
 
     /// <summary>
     /// 对参数添加rc4加密
     /// </summary>
-    /// <param Name="method"></param>
-    /// <param Name="url"></param>
-    /// <param Name="data"></param>
-    /// <param Name="ssecurity"></param>
+    /// <param name="method"></param>
+    /// <param name="url"></param>
+    /// <param name="data"></param>
+    /// <param name="ssecurity"></param>
     /// <returns></returns>
-    private Dictionary<string, string> GetRc4Params(string method, string url, object data, string ssecurity)
+    private static Dictionary<string, string> GetRc4Params(string method, string url, object data, string ssecurity)
     {
-        Dictionary<string, string> dat = new Dictionary<string, string>();
-        dat["data"] = data.ToJson();
+        var dat = new Dictionary<string, string>
+        {
+            ["data"] = data.ToJson()
+        };
 
         var nonce = CalculateNonce();
         var signedNonce = SignedNonce(ssecurity, nonce);
@@ -556,27 +377,26 @@ public class MIotCloud : IMiotCloud
     /// <summary>
     /// 对数据使用sha1进行加密
     /// </summary>
-    /// <param Name="url"></param>
-    /// <param Name="dat"></param>
-    /// <param Name="nonce"></param>
-    /// <param Name="method"></param>
+    /// <param name="url"></param>
+    /// <param name="dat"></param>
+    /// <param name="nonce"></param>
+    /// <param name="method"></param>
     /// <returns></returns>
-    private string Sha1Sign(string url, Dictionary<string, string> dat, string nonce, string method = "POST")
+    private static string Sha1Sign(string url, Dictionary<string, string> dat, string nonce, string method = "POST")
     {
-        Uri uri = new Uri(url);
+        var uri = new Uri(url);
         var path = uri.AbsolutePath;
-        if (path.Length > 5 && path.Substring(0, 5) == "/app/")
+        if (path.Length > 5 && path[..5] == "/app/")
         {
-            path = path.Substring(4);
+            path = path[4..];
         }
 
-        var arr = new List<string>();
-        arr.Add(method.ToUpper());
-        arr.Add(path);
-        foreach (var pair in dat)
+        var arr = new List<string>
         {
-            arr.Add($"{pair.Key}={pair.Value}");
-        }
+            method.ToUpper(),
+            path
+        };
+        arr.AddRange(dat.Select(pair => $"{pair.Key}={pair.Value}"));
 
         arr.Add(nonce);
         var sign = string.Join("&", arr);
@@ -587,10 +407,10 @@ public class MIotCloud : IMiotCloud
     /// <summary>
     /// 加密消息体
     /// </summary>
-    /// <param Name="key"></param>
-    /// <param Name="data"></param>
+    /// <param name="key"></param>
+    /// <param name="data"></param>
     /// <returns></returns>
-    private string EncryptData(string key, string data)
+    private static string EncryptData(string key, string data)
     {
         var p = new Rc4(key).Init1024().Crypt(data.GetBytes()).ToBase64();
         return p;
@@ -599,10 +419,10 @@ public class MIotCloud : IMiotCloud
     /// <summary>
     /// 解密消息体
     /// </summary>
-    /// <param Name="key"></param>
-    /// <param Name="data"></param>
+    /// <param name="key"></param>
+    /// <param name="data"></param>
     /// <returns></returns>
-    private string DecryptData(string key, string data)
+    private static string DecryptData(string key, string data)
     {
         var baseData = Convert.FromBase64String(data);
         var p = new Rc4(key).Init1024().Crypt(baseData);
@@ -612,10 +432,10 @@ public class MIotCloud : IMiotCloud
     /// <summary>
     /// 生成校验码
     /// </summary>
-    /// <param Name="secret"></param>
-    /// <param Name="nonce"></param>
+    /// <param name="secret"></param>
+    /// <param name="nonce"></param>
     /// <returns></returns>
-    private string SignedNonce(string secret, string nonce)
+    private static string SignedNonce(string secret, string nonce)
     {
         var secretBytes = Convert.FromBase64String(secret);
         var nonceBytes = Convert.FromBase64String(nonce);
@@ -628,20 +448,19 @@ public class MIotCloud : IMiotCloud
     /// 获取nonce一次性随机数
     /// </summary>
     /// <returns></returns>
-    private string CalculateNonce()
+    private static string CalculateNonce()
     {
         //Allocate a buffer
-        var firstByteArray = new byte[8];
+        Span<byte> buf = stackalloc byte[12];
         //Generate a cryptographically random set of bytes
-        using (var Rnd = RandomNumberGenerator.Create())
+        using (var rnd = RandomNumberGenerator.Create())
         {
-            Rnd.GetBytes(firstByteArray);
+            rnd.GetBytes(buf[..8]);
         }
 
-        var secondByteArr = ((int)(SbUtil.CurrentSeconds() / 60)).ToBytesBig(4);
-        var finalByteArr = firstByteArray.Concat(secondByteArr).ToArray();
+        MemoryMarshal.Cast<byte, int>(buf[8..])[0] = DateTimeOffset.UtcNow.Second;
         //Base64 encode and then return
-        return Convert.ToBase64String(finalByteArr);
+        return Convert.ToBase64String(buf);
     }
 
     public async Task<List<XiaoMiDeviceInfo>> GetDeviceListAsync()
@@ -674,7 +493,7 @@ public class MIotCloud : IMiotCloud
 
     public async Task<List<GetConsumableItemsOutputDto>> GetConsumableItemsAsync(string homeId)
     {
-        if (!decimal.TryParse(homeId, out var homeIdInt))
+        if (!decimal.TryParse(homeId, out _))
         {
             throw new NotSupportedException("homeId必须为数字");
         }
@@ -684,8 +503,8 @@ public class MIotCloud : IMiotCloud
 
         var inputDto = new GetConsumableItemsInputDto()
         {
-            home_id = Int64.Parse(homeId),
-            owner_id = Int64.Parse(loginInfoDto.UserId),
+            home_id = long.Parse(homeId),
+            owner_id = long.Parse(loginInfoDto.UserId),
             //dids = new List<string>(),
             //accessKey = "REMOVED",
             //filter_ignore = true
@@ -699,7 +518,7 @@ public class MIotCloud : IMiotCloud
         var result = JsonConvert.DeserializeObject<GetConsumableItemsOutputResultDto>(decryptData);
         if (result?.Code == 0)
         {
-            return result.Result?.items ?? new List<GetConsumableItemsOutputDto>();
+            return result.Result?.items ?? [];
         }
 
         var errorMsg = $"Get ConsumableItems error,reason:{result?.Message}";
@@ -819,7 +638,7 @@ public class MIotCloud : IMiotCloud
 
     public async Task<GetPropOutputItemDto> GetPropertyAsync(GetPropertyDto property)
     {
-        var result = await this.GetPropertiesAsync(new List<GetPropertyDto>() { property });
+        var result = await this.GetPropertiesAsync([property]);
         return result.First();
     }
 
@@ -877,18 +696,18 @@ public class MIotCloud : IMiotCloud
 
     public async Task<SetPropOutputItemDto> SetPropertyAsync(SetPropertyDto property)
     {
-        var result = await this.SetPropertiesAsync(new List<SetPropertyDto>() { property });
+        var result = await this.SetPropertiesAsync([property]);
         return result.First();
     }
 
-    public async Task LoginAsync()
+    public Task LoginAsync()
     {
-        throw new NotSupportedException();
+        return Task.FromException(new NotSupportedException());
     }
 
-    public async Task LogOutAsync()
+    public Task LogOutAsync()
     {
-        throw new NotSupportedException();
+        return Task.FromException(new NotSupportedException());
     }
 
     public async Task<(string, string)> RequestLogin()
@@ -965,7 +784,7 @@ public class MIotCloud : IMiotCloud
         fegiFeignUnitOfWork.AddCookie(url, new Cookie("deviceId", clientId));
 
         var startValue = "&&&START&&&";
-        var qrCodeLoginResultString = "";
+        string qrCodeLoginResultString;
         try
         {
             qrCodeLoginResultString = await xiaoMiLoginService.QrCodeLogin(checkUrl);

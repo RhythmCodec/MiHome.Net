@@ -20,11 +20,11 @@ public class MiioProtocol
     /// </summary>
     private bool isDiscovered;
 
-    private IPAddress ipAddress;
+    private readonly IPAddress ipAddress;
     /// <summary>
     /// 设备的token值
     /// </summary>
-    private string token;
+    private readonly string token;
 
     private Command requestCommand;
 
@@ -32,7 +32,7 @@ public class MiioProtocol
     /// <summary>
     /// token值的16进制
     /// </summary>
-    private byte[] tokenBytes;
+    private readonly byte[] tokenBytes;
 
     /// <summary>
     /// 批量获取属性
@@ -163,7 +163,7 @@ public class MiioProtocol
     /// 发送握手包
     /// </summary>
     /// <returns></returns>
-    private async Task SendHandshake()
+    private Task SendHandshake()
     {
         var serverSocket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
         serverSocket.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.Broadcast, 1);
@@ -180,7 +180,7 @@ public class MiioProtocol
             if (len > 0)
             {
                 this.requestCommand = Command.Parse(buffer,this.token);
-                return;
+                return Task.CompletedTask;
             }
         }
     }

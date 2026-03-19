@@ -1,27 +1,50 @@
-﻿namespace MiHome.Net.Dto;
+﻿using Refit;
+
+namespace MiHome.Net.Dto;
 
 /// <summary>
 /// 二维码登录参数
 /// </summary>
 public class QrCodeLoginInputDto
 {
-    public string _qrsize { get; set; }
-    public string qs { get; set; }
+    [AliasAs("_qrsize")]
+    public string? QrSize { get; set; }
 
-    public string bizDeviceType { get; set; } = "";
-    public string callback { get; set; }
+    [AliasAs("qs")]
+    public required string Qs { get; set; }
 
-    public string _json { get; set; } = "true";
-    public string theme { get; set; } = "";
+    [AliasAs("bizDeviceType")]
 
-    public string sid { get; set; } = "xiaomiio";
-    public string needTheme { get; set; } = "false";
+    public string BusinessDeviceType { get; set; } = "";
 
-    public string showActiveX { get; set; } = "false";
-    public string _local { get; set; } = "zh_CN";
+    [AliasAs("callback")]
+    public required string Callback { get; set; }
 
-    public string _sign { get; set; } 
-    public string _dc { get; set; }
+    [AliasAs("_json")]
 
-    public string serviceParam { get; set; }
+    public bool Json { get; set; } = true;
+
+    [AliasAs("theme")]
+    public string Theme { get; set; } = "";
+
+    [AliasAs("sid")]
+    public string Sid { get; set; } = "xiaomiio";
+
+    [AliasAs("needTheme")]
+    public bool NeedTheme { get; set; } = false;
+
+    [AliasAs("showActiveX")]
+    public bool ShowActiveX { get; set; } = false;
+
+    [AliasAs("_local")]
+    public string Local { get; set; } = "zh_CN";
+
+    [AliasAs("_sign")]
+    public required string Sign { get; set; }
+
+    [AliasAs("_dc")]
+    public required string Dc { get; set; }
+
+    [AliasAs("serviceParam")]
+    public required string ServiceParam { get; set; }
 }

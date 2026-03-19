@@ -5,5 +5,5 @@ public class GetSceneInputDto
     /// <summary>
     /// 家庭id
     /// </summary>
-    public string home_id { get; set; }
+    public required string HomeId { get; set; }
 }

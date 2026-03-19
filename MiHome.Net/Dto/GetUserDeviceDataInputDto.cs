@@ -2,13 +2,13 @@
 
 public class GetUserDeviceDataInputDto
 {
-    public string Did { get; set; }
-    public string Key { get; set; }
-    public string Type { get; set; }
-    public long time_start { get; set; }
+    public required string Did       { get; set; }
+    public required string Key       { get; set; }
+    public required string Type      { get; set; }
+    public          long   TimeStart { get; set; }
 
-    public long time_end { get; set; }
-    public int Limit { get; set; }
+    public long TimeEnd { get; set; }
+    public int  Limit   { get; set; }
 
-    public string Uid { get; set; }
+    public required string Uid { get; set; }
 }

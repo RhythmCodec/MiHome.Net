@@ -1,7 +1,8 @@
-﻿using System.Security.Cryptography;
-using Newtonsoft.Json;
-using Newtonsoft.Json.Serialization;
-using SummerBoot.Core;
+﻿using System.Buffers.Binary;
+using System.Diagnostics;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
 
 namespace MiHome.Net.Miio;
 
@@ -10,130 +11,92 @@ namespace MiHome.Net.Miio;
 /// </summary>
 public class Command
 {
-    public static Command Parse(byte[] bytes, string token)
+    private static readonly JsonSerializerOptions SerializerOptions = Constants.JsonSerializerOption;
+
+    public static Command Parse(ReadOnlySpan<byte> bytes, byte[] token)
     {
         var command = new Command();
 
-        var magicNumber = bytes.Take(2).ToArray().ByteArrayToHexStringThenToInt();
+        var magicNumber = BinaryPrimitives.ReadInt16BigEndian(bytes);
         command.MagicNumber = magicNumber;
-        var length = bytes.Skip(2).Take(2).ToArray().ByteArrayToHexStringThenToInt();
+        var length = BinaryPrimitives.ReadInt16BigEndian(bytes[2..]);
         command.Length = length;
-        var unknown = bytes.Skip(4).Take(4).ToArray().ByteArrayToHexStringThenToInt();
+        var unknown = BinaryPrimitives.ReadInt32BigEndian(bytes[4..]);
         command.Unknown = unknown;
-        var deviceId = bytes.Skip(8).Take(4).ToArray().ByteArrayToHexStringThenToInt();
+        var deviceId = BinaryPrimitives.ReadInt32BigEndian(bytes[8..]);
         command.DeviceId = deviceId;
-        var ts = ((double)(bytes.Skip(12).Take(4).ToArray().ByteArrayToHexStringThenToInt())).UnixTimeStampToUtcDateTime();
+        var ts = DateTimeOffset.FromUnixTimeSeconds(BinaryPrimitives.ReadInt32BigEndian(bytes[12..]));
         command.Ts = ts;
 
-        command.MagicNumberBytes = bytes.Take(2).ToArray();
-        command.LengthBytes = bytes.Skip(2).Take(2).ToArray();
-        command.UnknownBytes = bytes.Skip(4).Take(4).ToArray();
-        command.DeviceIdBytes = bytes.Skip(8).Take(4).ToArray();
-        command.TsBytes = bytes.Skip(12).Take(4).ToArray();
-        command.CheckSum = bytes.Skip(16).Take(16).ToArray();
-        command.Token = token;
-        command.TokenBytes = token.HexToBytes(); ;
+        bytes[..2].CopyTo(command.MagicNumberBytes);
+        bytes[2..4].CopyTo(command.LengthBytes);
+        bytes[4..8].CopyTo(command.UnknownBytes);
+        bytes[8..12].CopyTo(command.DeviceIdBytes);
+        bytes[12..16].CopyTo(command.TsBytes);
+        bytes[16..32].CopyTo(command.CheckSum);
+
+        Debug.Assert(token.Length == command.TokenBytes.Length);
+        token.CopyTo(command.TokenBytes);
         if (length > 0)
         {
-            var dataBytes= bytes.Skip(32).Take(length - 32).ToArray();
+            var dataBytes = bytes[32..length].ToArray();
             var decryptDataBytes = command.Decrypt(dataBytes);
-            if (decryptDataBytes.Length > 0 && decryptDataBytes.Last() == 0)
-            {
-                decryptDataBytes = decryptDataBytes.Take(decryptDataBytes.Length - 1).ToArray();
-            }
-
-            command.DataBytes = decryptDataBytes;
-            if (decryptDataBytes.Length > 0)
-            {
-                command.Data = decryptDataBytes.GetString();
-            }
+            if (decryptDataBytes.Length > 0 && decryptDataBytes[^1] == 0)
+                command.DataBytes = decryptDataBytes.AsSpan()[..^1].ToArray();
         }
         return command;
     }
 
     public byte[] Build()
     {
-        var result = new List<byte>();
-        result.AddRange(this.MagicNumberBytes);
-        result.AddRange(this.LengthBytes);
-        result.AddRange(this.UnknownBytes);
-        result.AddRange(this.DeviceIdBytes);
-        this.TsBytes = ((int)this.Ts.UtcDateTimeToUnixTimeStamp()).ToString("X8").HexToBytes();
-        result.AddRange(this.TsBytes);
-        result.AddRange(this.TokenBytes);
-        result.AddRange(this.DataBytes);
-        var checkSum = result.ToArray().BytesToMd5Bytes();
-        result = new List<byte>();
-        result.AddRange(this.MagicNumberBytes);
-        result.AddRange(this.LengthBytes);
-        result.AddRange(this.UnknownBytes);
-        result.AddRange(this.DeviceIdBytes);
-        this.TsBytes = ((int)this.Ts.UtcDateTimeToUnixTimeStamp()).ToString("X8").HexToBytes();
-        result.AddRange(this.TsBytes);
-        result.AddRange(checkSum);
-        result.AddRange(this.DataBytes);
-        return result.ToArray();
-    }
+        var buffer = new byte[Length];
+        var pBuf = buffer.AsSpan();
+        MagicNumberBytes.CopyTo(pBuf);
+        LengthBytes.CopyTo(pBuf[2..]);
+        UnknownBytes.CopyTo(pBuf[4..]);
+        DeviceIdBytes.CopyTo(pBuf[8..]);
+        TsBytes.CopyTo(pBuf[12..]);
+        TokenBytes.CopyTo(pBuf[16..]);
+        DataBytes.CopyTo(pBuf[32..]);
+        var checkSum = MD5.HashData(pBuf);
+        checkSum.CopyTo(pBuf[16..]);
 
-    private void CheckToken()
-    {
-        if (TokenBytes == null || TokenBytes.Length == 0)
-        {
-            throw new Exception("token can not be null");
-        }
+        return buffer;
     }
 
     private byte[] Encrypt(byte[] body)
     {
-        if (TokenBytes == null || TokenBytes.Length == 0)
-        {
-            return body;
-        }
-        var key = TokenBytes.BytesToMd5Bytes();
-        var ivList = new List<byte>();
-        for (int i = 0; i < key.Length; i++)
-        {
-            ivList.Add(key[i]);
-        }
-        ivList.AddRange(TokenBytes);
-        var iv = ivList.ToArray().BytesToMd5Bytes();
-        var aes = new RijndaelManaged();
+        var key = MD5.HashData(TokenBytes);
+        var iv = key.Concat(TokenBytes).ToArray();
+        iv = MD5.HashData(iv);
+        using var aes = Aes.Create();
         aes.BlockSize = 128;
         aes.KeySize = 256;
         aes.Mode = CipherMode.CBC;
         aes.Padding = PaddingMode.PKCS7;
         aes.Key = key;
         aes.IV = iv;
-        var crypt = aes.CreateEncryptor();
 
-        var cipherText = crypt.TransformFinalBlock(body.ToArray(), 0, body.ToArray().Length);
+        using var crypt = aes.CreateEncryptor();
+        var cipherText = crypt.TransformFinalBlock(body, 0, body.Length);
         return cipherText;
     }
 
     private byte[] Decrypt(byte[] body)
     {
-        if (TokenBytes == null || TokenBytes.Length == 0)
-        {
-            return body;
-        }
-        var key = TokenBytes.BytesToMd5Bytes();
-        var ivList = new List<byte>();
-        for (int i = 0; i < key.Length; i++)
-        {
-            ivList.Add(key[i]);
-        }
-        ivList.AddRange(TokenBytes);
-        var iv = ivList.ToArray().BytesToMd5Bytes();
-        var aes = new RijndaelManaged();
+        var key = MD5.HashData(TokenBytes);
+        var iv = key.Concat(TokenBytes).ToArray();
+        iv = MD5.HashData(iv);
+        using var aes = Aes.Create();
         aes.BlockSize = 128;
         aes.KeySize = 256;
         aes.Mode = CipherMode.CBC;
         aes.Padding = PaddingMode.PKCS7;
         aes.Key = key;
         aes.IV = iv;
-        var crypt = aes.CreateDecryptor();
+        using var crypt = aes.CreateDecryptor();
 
-        var cipherText = crypt.TransformFinalBlock(body.ToArray(), 0, body.ToArray().Length);
+        var cipherText = crypt.TransformFinalBlock(body, 0, body.Length);
         return cipherText;
     }
 
@@ -141,7 +104,7 @@ public class Command
     /// <summary>
     /// 魔术数
     /// </summary>
-    public byte[] MagicNumberBytes { get; set; } = new byte[2] { 33, 49 };
+    public byte[] MagicNumberBytes { get; set; } = [33, 49];
     /// <summary>
     /// 数据长度
     /// </summary>
@@ -149,13 +112,13 @@ public class Command
     /// <summary>
     /// 数据长度
     /// </summary>
-    public byte[] LengthBytes { get; set; }
+    public byte[] LengthBytes { get; set; } = [0, 0];
 
     public int Unknown { get; set; }
     /// <summary>
     /// 分割
     /// </summary>
-    public byte[] UnknownBytes { get; set; } = new byte[4] { 0, 0, 0, 0 };
+    public byte[] UnknownBytes { get; set; } = [0, 0, 0, 0];
     /// <summary>
     /// 设备id
     /// </summary>
@@ -163,44 +126,35 @@ public class Command
     /// <summary>
     /// 设备id
     /// </summary>
-    public byte[] DeviceIdBytes { get; set; }
+    public byte[] DeviceIdBytes { get; set; } = [0, 0, 0, 0];
     /// <summary>
     /// 时间戳
     /// </summary>
-    public DateTime Ts { get; set; }
+    public DateTimeOffset Ts { get; set; }
 
-    public byte[] TsBytes { get; set; }
+    public byte[] TsBytes { get; set; } = [0, 0, 0, 0];
+
     /// <summary>
     /// token值
     /// </summary>
-    public string Token { get; set; }
-    /// <summary>
-    /// token值
-    /// </summary>
-    public byte[] TokenBytes { get; set; }
+    public byte[] TokenBytes { get; set; } = new byte[16];
     /// <summary>
     /// 数据
     /// </summary>
-    public byte[] DataBytes { get; private set; }
+    public byte[]? DataBytes { get; private set; }
 
-    public string Data { get; set; }
     public void SetData(CommandPayload commandPayload)
     {
-        var op = new JsonSerializerSettings()
-        {
-            ContractResolver = new CamelCasePropertyNamesContractResolver(),
-        };
-        var methodCallDtos = JsonConvert.SerializeObject(commandPayload, op).Replace(":", ": ").Replace(",", ", ");
-        var bytes = methodCallDtos.GetBytes().ToList();
+        var methodCallDtos = JsonSerializer.Serialize(commandPayload, SerializerOptions);
+        var bytes = Encoding.UTF8.GetBytes(methodCallDtos).ToList();
         bytes.Add(0);
         var result = Encrypt(bytes.ToArray());
-        this.DataBytes = result;
-        this.Length = result.Length + 32;
-        this.LengthBytes = this.Length.ToString("X4").HexToBytes();
+        DataBytes = result;
+        Length = result.Length + 32;
+        BinaryPrimitives.WriteInt16BigEndian(LengthBytes, (short)Length);
     }
     /// <summary>
     /// 检查和，用来进行校验
     /// </summary>
-    public byte[] CheckSum { get; set; }
-
+    public byte[] CheckSum { get; set; } = new byte[16];
 }

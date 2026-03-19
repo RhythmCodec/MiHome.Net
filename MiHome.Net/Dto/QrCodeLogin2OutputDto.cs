@@ -2,20 +2,20 @@
 
 public class QrCodeLogin2OutputDto
 {
-    public string psecurity { get; set; }
-    public long nonce { get; set; }
-    public string ssecurity { get; set; }
-    public string passToken { get; set; }
-    public string userId { get; set; }
-    public string cUserId { get; set; }
-    public int securityStatus { get; set; }
-    public string notificationUrl { get; set; }
-    public int pwd { get; set; }
-    public int child { get; set; }
-    public int code { get; set; }
-    public string result { get; set; }
-    public string desc { get; set; }
-    public string description { get; set; }
-    public string location { get; set; }
-    public object captchaUrl { get; set; }
+    public string  Psecurity       { get; set; } = "";
+    public long    Nonce           { get; set; }
+    public string  Ssecurity       { get; set; } = "";
+    public string  PassToken       { get; set; } = "";
+    public long     UserId          { get; set; }
+    public string  CUserId         { get; set; } = "";
+    public int     SecurityStatus  { get; set; }
+    public string  NotificationUrl { get; set; } = "";
+    public int     Pwd             { get; set; }
+    public int     Child           { get; set; }
+    public int     Code            { get; set; }
+    public string  Result          { get; set; } = "";
+    public string  Desc            { get; set; } = "";
+    public string  Description     { get; set; } = "";
+    public string  Location        { get; set; } = "";
+    public object? CaptchaUrl      { get; set; }
 }

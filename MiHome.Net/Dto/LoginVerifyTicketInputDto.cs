@@ -1,11 +1,18 @@
-﻿namespace MiHome.Net.Dto;
+﻿using Refit;
+
+namespace MiHome.Net.Dto;
 
 public class LoginVerifyTicketInputDto
 {
-    public int _flag { get; set; }
+    [AliasAs("_flag")]
+    public int Flag { get; set; }
 
-    public string ticket { get; set; }
+    [AliasAs("ticket")]
+    public required string Ticket { get; set; }
 
-    public bool trust { get; set; }
-    public bool _json { get; set; }
+    [AliasAs("trust")]
+    public bool Trust { get; set; }
+
+    [AliasAs("_json")]
+    public bool Json { get; set; }
 }

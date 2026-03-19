@@ -1,48 +1,45 @@
-﻿using System.Net;
+﻿using System.Diagnostics.CodeAnalysis;
+using System.Net;
 using System.Net.Sockets;
-using Newtonsoft.Json;
-using SummerBoot.Core;
+using System.Text.Json;
 
 namespace MiHome.Net.Miio;
 
 public class MiioProtocol
 {
-    public MiioProtocol(string ip,string token)
-    {
-        this.ipAddress = IPAddress.Parse(ip);
-        this.token = token;
-        this.isDiscovered = false;
-        this.tokenBytes = token.HexToBytes();
-        this.id = 0;
-    }
-    /// <summary>
-    /// 是否有发现
-    /// </summary>
-    private bool isDiscovered;
+    private static readonly JsonSerializerOptions SerializerOptions = Constants.JsonSerializerOption;
 
-    private readonly IPAddress ipAddress;
-    /// <summary>
-    /// 设备的token值
-    /// </summary>
-    private readonly string token;
-
-    private Command requestCommand;
-
-    private int id;
     /// <summary>
     /// token值的16进制
     /// </summary>
-    private readonly byte[] tokenBytes;
+    private readonly byte[] _tokenBytes;
+
+    private readonly IPAddress _ipAddress;
+    private          Command?  _requestCommand;
+    private          int       _id;
+
+    /// <summary>
+    /// 是否有发现
+    /// </summary>
+    [MemberNotNull(nameof(_requestCommand))]
+    private bool IsDiscovered { get; set; }
+
+    public MiioProtocol(string ip, string token)
+    {
+        _ipAddress = IPAddress.Parse(ip);
+        _tokenBytes = Convert.FromHexString(token);
+        _id = 0;
+    }
 
     /// <summary>
     /// 批量获取属性
     /// </summary>
     /// <param name="propertiesPayloads"></param>
     /// <returns></returns>
-    public async Task<GetPropertiesResult> GetPropertiesAsync(List<GetPropertyPayload> propertiesPayloads)
+    public async Task<GetPropertiesResult?> GetPropertiesAsync(List<GetPropertyPayload> propertiesPayloads)
     {
         await SendAsync("get_properties", propertiesPayloads);
-        var result= JsonConvert.DeserializeObject<GetPropertiesResult>(this.requestCommand.Data);
+        var result = JsonSerializer.Deserialize<GetPropertiesResult>(_requestCommand.DataBytes, SerializerOptions);
         return result;
     }
 
@@ -51,10 +48,10 @@ public class MiioProtocol
     /// </summary>
     /// <param name="propertiesPayloads"></param>
     /// <returns></returns>
-    public async Task<SetPropertiesResult> SetPropertiesAsync(List<SetPropertyPayload> propertiesPayloads)
+    public async Task<SetPropertiesResult?> SetPropertiesAsync(List<SetPropertyPayload> propertiesPayloads)
     {
         await SendAsync("set_properties", propertiesPayloads);
-        var result = JsonConvert.DeserializeObject<SetPropertiesResult>(this.requestCommand.Data);
+        var result = JsonSerializer.Deserialize<SetPropertiesResult>(_requestCommand.DataBytes, SerializerOptions);
         return result;
     }
 
@@ -63,10 +60,10 @@ public class MiioProtocol
     /// </summary>
     /// <param name="callActionPayload"></param>
     /// <returns></returns>
-    public async Task<CallActionResult> CallActionAsync(CallActionPayload callActionPayload)
+    public async Task<CallActionResult?> CallActionAsync(CallActionPayload callActionPayload)
     {
         await SendAsync("action", callActionPayload);
-        var result = JsonConvert.DeserializeObject<CallActionResult>(this.requestCommand.Data);
+        var result = JsonSerializer.Deserialize<CallActionResult>(_requestCommand.DataBytes, SerializerOptions);
         return result;
     }
 
@@ -74,138 +71,97 @@ public class MiioProtocol
     /// 获取设备信息
     /// </summary>
     /// <returns></returns>
-    public async Task<GetDeviceInfoResult> GetDeviceInfoAsync()
+    public async Task<GetDeviceInfoResult?> GetDeviceInfoAsync()
     {
         await SendAsync("miIO.info");
-        var result = JsonConvert.DeserializeObject<GetDeviceInfoResult>(this.requestCommand.Data);
+        var result = JsonSerializer.Deserialize<GetDeviceInfoResult>(_requestCommand.DataBytes, SerializerOptions);
         return result;
-        
     }
 
-    private async Task SendAsync(string command, object parameter =null)
+    private async Task SendAsync(string command, object? parameter = null)
     {
-        if (!this.isDiscovered)
+        if (!IsDiscovered)
         {
-            await this.SendHandshake();
-            this.isDiscovered = true;
+            await SendHandshake();
+            IsDiscovered = true;
         }
         var body = CreateBody(command, parameter);
         var sendCommand = new Command()
         {
-            DeviceIdBytes = requestCommand.DeviceIdBytes,
-            UnknownBytes = requestCommand.UnknownBytes,
-            Ts = requestCommand.Ts.AddSeconds(1),
-            TokenBytes = this.tokenBytes
+            DeviceIdBytes = _requestCommand.DeviceIdBytes,
+            UnknownBytes = _requestCommand.UnknownBytes,
+            Ts = _requestCommand.Ts.AddSeconds(1),
+            TokenBytes = _tokenBytes
         };
         sendCommand.SetData(body);
-        
-        var sendBytes= sendCommand.Build();
-        var serverSocket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
+
+        var sendBytes = sendCommand.Build();
+        using var serverSocket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
         serverSocket.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.Broadcast, 1);
         serverSocket.ReceiveTimeout = 5000;
-        //serverSocket.EnableBroadcast = true;
-        //serverSocket.Connect(IPAddress.Parse("192.168.50.141"),54321 );
-        var endPoint = new IPEndPoint(this.ipAddress, 54321);
+        var endPoint = new IPEndPoint(_ipAddress, 54321);
         serverSocket.SendTo(sendBytes, endPoint);
 
-        while (true)
+        var buffer = new byte[4096];
+        var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+
+        try
         {
-            byte[] buffer = new byte[4096];
-            var len = serverSocket.Receive(buffer);
+            var len = await serverSocket.ReceiveAsync(buffer, cts.Token);
             if (len > 0)
             {
-                this.requestCommand = Command.Parse(buffer,this.token);
-                return;
+                _requestCommand = Command.Parse(buffer, _tokenBytes);
             }
         }
+        catch (OperationCanceledException)
+        { }
     }
 
-    private CommandPayload CreateBody(string command, object parameter = null)
+    private CommandPayload CreateBody(string command, object? parameter = null)
     {
-        this.id++;
-        if (this.id >= 9999)
+        _id++;
+        if (_id >= 9999)
         {
-            this.id = 1;
+            _id = 1;
         }
         var methodCallDto = new CommandPayload()
         {
-            Id = this.id,
+            Id = _id,
             Method = command,
             Params = parameter
         };
-      
+
         return methodCallDto;
     }
 
-    //private byte[] EncryptBody(byte[] body)
-    //{
-    //    var key = tokenBytes.BytesToMd5Bytes();
-    //    var ivList = new List<byte>();
-    //    for (int i = 0; i < key.Length; i++)
-    //    {
-    //        ivList.Add(key[i]);
-    //    }
-    //    ivList.AddRange(tokenBytes);
-    //    var iv = ivList.ToArray().BytesToMd5Bytes();
-    //    var aes = new RijndaelManaged();
-    //    aes.BlockSize = 128;
-    //    aes.KeySize = 256;
-    //    aes.Mode = CipherMode.CBC;
-    //    aes.Padding = PaddingMode.PKCS7;
-    //    aes.Key = key;
-    //    aes.IV = iv;
-    //    var crypt = aes.CreateEncryptor();
-
-    //    var cipherText = crypt.TransformFinalBlock(body.ToArray(), 0, body.ToArray().Length);
-    //    return cipherText;
-    //}
     /// <summary>
     /// 发送握手包
     /// </summary>
     /// <returns></returns>
-    private Task SendHandshake()
+    private async Task SendHandshake()
     {
-        var serverSocket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
+        using var serverSocket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
         serverSocket.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.Broadcast, 1);
-        //serverSocket.EnableBroadcast = true;
-        //serverSocket.Connect(IPAddress.Parse("192.168.50.141"),54321 );
-        var endPoint = new IPEndPoint(this.ipAddress, 54321);
-        var helloBytes = "21310020ffffffffffffffffffffffffffffffffffffffffffffffffffffffff".HexToBytes();
+        var endPoint = new IPEndPoint(_ipAddress, 54321);
+        ReadOnlySpan<byte> helloBytes =
+        [
+            0x21, 0x31, 0x00, 0x20, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+            0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff
+        ];
         serverSocket.SendTo(helloBytes, endPoint);
 
-        while (true)
+        var buffer = new byte[1024];
+        var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+
+        try
         {
-            byte[] buffer = new byte[1024];
-            var len = serverSocket.Receive(buffer);
+            var len = await serverSocket.ReceiveAsync(buffer, cts.Token);
             if (len > 0)
             {
-                this.requestCommand = Command.Parse(buffer,this.token);
-                return Task.CompletedTask;
+                _requestCommand = Command.Parse(buffer, _tokenBytes);
             }
         }
+        catch (OperationCanceledException)
+        { }
     }
-
-    //public async Task<string> GetUserDeviceData(GetUserDeviceDataInputDto dto)
-    //{
-    //    await BeginControlDeviceCookieAsync();
-    //    var loginInfoDto = await GetLoginInfoAsync();
-    //    dto.Uid= loginInfoDto.UserId;
-
-
-    //    var param = GetRc4Params("POST", "https://api.io.mi.com/app/user/get_user_device_data", dto,
-    //        loginInfoDto.Ssecurity);
-    //    var signedNonce = param["signedNonce"];
-    //    var resultString = await xiaoMiControlDevicesService.GetUserDeviceData(param);
-    //    await StopControlDeviceCookieAsync();
-    //    var decryptData = DecryptData(signedNonce, resultString);
-    //    var result = JsonConvert.DeserializeObject<SetPropOutputDto>(decryptData);
-    //    if (result?.Code == 0)
-    //    {
-    //        //return result.Result;
-    //    }
-
-    //    var errorMsg = $"propGet error,reason:{result?.Message}";
-    //    logger?.LogError(errorMsg);
-    //    throw new Exception(errorMsg);
-    //}
 }

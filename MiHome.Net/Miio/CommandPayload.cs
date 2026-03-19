@@ -2,7 +2,7 @@
 
 public class CommandPayload
 {
-    public int Id { get; set; }
-    public string Method { get; set; }
-    public object Params { get; set; }
+    public          int     Id     { get; set; }
+    public required string  Method { get; set; }
+    public          object? Params { get; set; }
 }

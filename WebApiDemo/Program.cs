@@ -1,6 +1,4 @@
 
-using MiHome.Net.Middleware;
-
 namespace WebApiDemo
 {
     public class Program

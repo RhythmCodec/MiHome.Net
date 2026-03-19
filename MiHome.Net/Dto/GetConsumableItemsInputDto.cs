@@ -2,9 +2,10 @@
 
 public class GetConsumableItemsInputDto
 {
-    public Int64 home_id { get; set; }
+    public long HomeId { get; set; }
 
-    public Int64 owner_id { get; set; }
+    public long OwnerId { get; set; }
+
     /// <summary>
     /// 设备id列表
     /// </summary>

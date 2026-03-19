@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace MiHome.Net.Dto;
 
 public class CallActionInputDto
@@ -5,12 +7,13 @@ public class CallActionInputDto
     /// <summary>
     /// 设备id
     /// </summary>
-    public string Did { get; set; }
+    public required string Did { get; set; }
 
-    public int Aiid { get; set; }
-    public int Siid { get; set; }
+    [JsonPropertyName("aiid")]
+    public int AiId { get; set; }
 
-    public List<string> In { get; set; }
+    [JsonPropertyName("siid")]
+    public int SiId { get; set; }
+
+    public required List<string> In { get; set; }
 }
-
-

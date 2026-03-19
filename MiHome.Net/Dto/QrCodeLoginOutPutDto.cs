@@ -2,15 +2,15 @@
 
 public class QrCodeLoginOutPutDto
 {
-    public string loginUrl { get; set; }
-    public string qr { get; set; }
-    public string qrTips { get; set; }
-    public string lp { get; set; }
-    public string sl { get; set; }
-    public int timeout { get; set; }
-    public int timeInterval { get; set; }
-    public int code { get; set; }
-    public string result { get; set; }
-    public string desc { get; set; }
-    public string description { get; set; }
+    public string LoginUrl     { get; set; } = "";
+    public string Qr           { get; set; } = "";
+    public string QrTips       { get; set; } = "";
+    public string Lp           { get; set; } = "";
+    public string Sl           { get; set; } = "";
+    public int    Timeout      { get; set; }
+    public int    TimeInterval { get; set; }
+    public int    Code         { get; set; }
+    public string Result       { get; set; } = "";
+    public string Desc         { get; set; } = "";
+    public string Description  { get; set; } = "";
 }

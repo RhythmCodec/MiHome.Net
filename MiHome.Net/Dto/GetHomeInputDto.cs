@@ -5,10 +5,9 @@
 /// </summary>
 public class GetHomeInputDto
 {
-    public bool fg { get; set; }
-    public bool fetch_share { get; set; }
-    public bool fetch_share_dev { get; set; }
-
-    public int limit { get; set; }
-    public int app_ver { get; set; }
+    public bool Fg            { get; set; }
+    public bool FetchShare    { get; set; }
+    public bool FetchShareDev { get; set; }
+    public int  Limit         { get; set; }
+    public int  AppVer        { get; set; }
 }

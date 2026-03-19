@@ -1,18 +1,22 @@
-﻿namespace MiHome.Net.Miio;
+﻿using System.Text.Json.Serialization;
+
+namespace MiHome.Net.Miio;
 
 public class CallActionPayload
 {
-    public string Did => $"call-{Siid}-{Aiid}";
+    public string Did => $"call-{SiId}-{AiId}";
     /// <summary>
     /// service id 服务id
     /// </summary>
-    public int Siid { get; set; }
+    [JsonPropertyName("siid")]
+    public int SiId { get; init; }
     /// <summary>
     /// action id 方法id
     /// </summary>
-    public int Aiid { get; set; }
+    [JsonPropertyName("aiid")]
+    public int AiId { get; init; }
     /// <summary>
     /// 入参
     /// </summary>
-    public List<string> In { get; set; }
+    public List<string> In { get; set; } = [];
 }

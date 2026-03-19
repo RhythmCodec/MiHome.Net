@@ -1,68 +1,67 @@
-﻿namespace MiHome.Net.Utils;
+﻿using System.Diagnostics.CodeAnalysis;
+
+namespace MiHome.Net.Utils;
 
 public class Rc4
 {
-    private int        idx, jdx;
-    private List<byte> ksa;
+    private int    _idx, _jdx;
+    private byte[] _ksa;
 
-    public Rc4(string key)
+    public Rc4(byte[] key)
     {
-        var pwd = Convert.FromBase64String(key);
-        var cnt = pwd.Length;
-        var tempKsa = new List<byte>();
-        for (int i = 0; i < 256; i++)
+        Ksa(key);
+        Init1024();
+    }
+
+    public void Crypt(Span<byte> data)
+    {
+        var i = _idx;
+        var j = _jdx;
+
+        foreach (ref var byt in data)
         {
-            tempKsa.Add((byte)i);
+            i = (i + 1) & 255;
+            j = (j + _ksa[i]) & 255;
+            (_ksa[i], _ksa[j]) = (_ksa[j], _ksa[i]);
+            var r = (byte)(byt ^ _ksa[(_ksa[i] + _ksa[j]) & 255]);
+            byt = r;
         }
 
+        _idx = i;
+        _jdx = j;
+    }
+
+    [MemberNotNull(nameof(_ksa))]
+    private void Ksa(ReadOnlySpan<byte> key)
+    {
+        var cnt = key.Length;
+        var tempKsa = Enumerable.Range(0, 256).Select(x => (byte)x).ToArray();
+
+
         var j = 0;
-        for (int i = 0; i < 256; i++)
+        for (var i = 0; i < 256; i++)
         {
-            j = (j + tempKsa[i] + pwd[i % cnt]) & 255;
+            j = (j + tempKsa[i] + key[i % cnt]) & 255;
             (tempKsa[i], tempKsa[j]) = (tempKsa[j], tempKsa[i]);
         }
 
-        ksa = tempKsa;
-        idx = 0;
-        jdx = 0;
+        _ksa = tempKsa;
+        _idx = 0;
+        _jdx = 0;
     }
 
-    public byte[] Crypt(byte[] data)
+    private void Init1024()
     {
-        var ksa = this.ksa;
-        var i = idx;
-        var j = jdx;
-        var outList = new List<byte>();
-        foreach (byte byt in data)
-        {
-            i = (i + 1) & 255;
-            j = (j + ksa[i]) & 255;
-            (ksa[i], ksa[j]) = (ksa[j], ksa[i]);
-            var r = (byte)(byt ^ ksa[(ksa[i] + ksa[j]) & 255]);
-            outList.Add(r);
-        }
-
-        idx = i;
-        jdx = j;
-        this.ksa = ksa;
-        return outList.ToArray();
-    }
-
-    public Rc4 Init1024()
-    {
-        var ksa = this.ksa;
-        var i = idx;
-        var j = jdx;
+        var i = _idx;
+        var j = _jdx;
         for (var k = 0; k != 1024; k++)
         {
             i = (i + 1) & 255;
-            j = (j + ksa[i]) & 255;
-            (ksa[i], ksa[j]) = (ksa[j], ksa[i]);
+            j = (j + _ksa[i]) & 255;
+            (_ksa[i], _ksa[j]) = (_ksa[j], _ksa[i]);
         }
 
-        idx = i;
-        jdx = j;
-        this.ksa = ksa;
-        return this;
+        _idx = i;
+        _jdx = j;
     }
 }

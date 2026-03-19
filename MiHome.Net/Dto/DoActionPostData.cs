@@ -2,6 +2,6 @@ namespace MiHome.Net.Dto;
 
 public class DoActionPostData
 {
-    public string AccessKey { get; set; }
-    public CallActionInputDto Params { get; set; }
+    public required string             AccessKey { get; set; }
+    public required CallActionInputDto Params    { get; set; }
 }

@@ -104,6 +104,7 @@ public class SceneDto
     /// <summary>
     /// 子id
     /// </summary>
+    [JsonPropertyName("sub_usIds")]
     public List<string> SubUsIds { get; set; } = [];
 
     /// <summary>
@@ -139,7 +140,7 @@ public class SceneDto
     /// <summary>
     /// 附加信息
     /// </summary>
-    public string? Extra { get; set; }
+    public SceneExtra? Extra { get; set; }
 
     /// <summary>
     /// 图标链接
@@ -167,6 +168,8 @@ public class SceneDto
     /// 鸿蒙额外信息
     /// </summary>
     public string? HmExtraInfo { get; set; }
+
+    public object? SceneElseAction { get; set; }
 }
 
 /// <summary>
@@ -470,4 +473,19 @@ public class Tags
 {
     [JsonExtensionData]
     public Dictionary<string, JsonElement>? ExtensionData { get; set; }
+}
+
+public class SceneExtra
+{
+    public string Identify       { get; set; } = "";
+    public string CarHomeId      { get; set; } = "";
+    public string PhoneId        { get; set; } = "";
+    public object TvTimewindow   { get; set; } = "";
+    public string CopySceneId    { get; set; } = "";
+    public string TemplateId     { get; set; } = "";
+    public string TranslateFrom  { get; set; } = "";
+    public string CarDid         { get; set; } = "";
+    public string LightingRoomId { get; set; } = "";
+    public string TimerType      { get; set; } = "";
+    public int    TemplateType   { get; set; }
 }

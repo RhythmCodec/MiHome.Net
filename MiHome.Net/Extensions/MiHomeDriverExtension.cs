@@ -65,7 +65,7 @@ public static class MiHomeDriverExtension
             .AddHttpMessageHandler<CryptoHandler>()
             .AddHttpMessageHandler<DeviceControlCookiesHandler>();
 
-        services.AddRefitClient<IXiaoMiLoginApi>(httpClientName: Constants.MI_LOGIN_NAME, settings: refitSettings)
+        services.AddRefitClient<IXiaoMiLoginApi>(httpClientName: Constants.MI_LOGIN_NAME)
             .ConfigurePrimaryHttpMessageHandler(sp =>
             {
                 var cookie = sp.GetRequiredKeyedService<ICookieContainer>(Constants.MI_LOGIN_NAME);
